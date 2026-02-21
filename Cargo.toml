@@ -1,0 +1,154 @@
+[workspace.package]
+name = "chess-engine"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93.0"
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/types",
+    "crates/board",
+    "crates/movegen",
+    "crates/eval",
+    "crates/search",
+    "crates/engine",
+    "crates/uci",
+    "crates/time",
+    "bins/chess-engine",
+]
+exclude = ["tests"]
+
+[workspace.dependencies]
+# Internal crates
+chess-types = { path = "crates/types" }
+chess-board = { path = "crates/board" }
+chess-movegen = { path = "crates/movegen" }
+chess-eval = { path = "crates/eval" }
+chess-search = { path = "crates/search" }
+chess-engine = { path = "crates/engine" }
+chess-uci = { path = "crates/uci" }
+
+# Serialization (optional, for debugging/config)
+serde = { version = "1.0", features = ["derive"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Parallelism (SMP feature)
+crossbeam = "0.8"
+rayon = "1.10"
+
+# Atomics for lock-free structures
+parking_lot = "0.12"
+
+# CLI for the binary
+clap = { version = "4.5", features = ["derive"] }
+
+# Logging (optional, for development)
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Testing
+proptest = "1.5"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+# =============================================================================
+# Workspace-wide lints (applied to all members)
+# =============================================================================
+[workspace.lints.rust]
+unsafe_code = "warn"
+missing_docs = "warn"
+rust_2024_compatibility = { level = "warn", priority = -1 }
+
+[workspace.lints.clippy]
+# Pedantic lints for functional style
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+# Unwrap/expect discipline
+unwrap_used = "warn"
+expect_used = "warn"
+
+# Functional programming encouragements
+manual_let_else = "warn"
+match_same_arms = "warn"
+redundant_closure_for_method_calls = "warn"
+unnecessary_wraps = "warn"
+iter_without_into_iter = "warn"
+
+# Performance lints
+trivially_copy_pass_by_ref = "warn"
+cloned_instead_of_copied = "warn"
+flat_map_option = "warn"
+
+# Allow some pedantic lints that conflict with our style
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+too_many_lines = "allow"
+
+# =============================================================================
+# Profiles
+# =============================================================================
+
+# Development: fast compilation, some optimizations for playability
+[profile.dev]
+opt-level = 1
+debug = true
+debug-assertions = true
+overflow-checks = true
+lto = false
+incremental = true
+
+# Development with full debug info
+[profile.dev.package."*"]
+opt-level = 2
+
+# Release: maximum performance
+[profile.release]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+# Release with debug symbols (for profiling)
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+strip = false
+
+# Benchmarking profile
+[profile.bench]
+inherits = "release"
+debug = true
+lto = "thin"
+
+# =============================================================================
+# Workspace-wide features
+# =============================================================================
+[workspace.metadata.features]
+# These are documented here for reference; actual features are in member crates
+
+# Evaluation strategies
+# classical-eval: Traditional hand-crafted evaluation (default)
+# nnue-eval: Neural network evaluation
+
+# Move generation strategies
+# magic-movegen: Magic bitboards (default, portable)
+# pext-movegen: PEXT-based generation (requires BMI2)
+
+# Search features
+# smp: Symmetric multiprocessing (Lazy SMP)
+
+# Extras
+# syzygy: Syzygy tablebase support
+# opening-book: Polyglot opening book support
+# tuning: Enable tuning infrastructure
+# trace: Detailed evaluation tracing
