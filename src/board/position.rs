@@ -1,5 +1,8 @@
-use crate::types::{Colour, Piece};
-use crate::board::{Bitboard};
+use super::Bitboard;
+use super::Square;
+use super::CastlingRights;
+use super::Colour;
+use super::ZobristHash;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Position {

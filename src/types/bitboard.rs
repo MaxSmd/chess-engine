@@ -1,4 +1,4 @@
-use crate::Square;
+use super::Square;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Bitboard(pub u64);
@@ -7,10 +7,14 @@ impl Bitboard {
     pub const EMPTY: Bitboard = Bitboard(0);
     pub const ALL: Bitboard = Bitboard(!0);
 
-    pub const FILE_A: Bitboard = Bitboard(0x0101010101010101);
-    pub const FILE_B: Bitboard = Bitboard(0x0202020202020202);
-    pub const FILE_G: Bitboard = Bitboard(0x4040404040404040);
-    pub const FILE_H: Bitboard = Bitboard(0x8080808080808080);
+    pub const FILE_A: Self = Self(0x0101_0101_0101_0101);
+    pub const FILE_B: Self = Self(0x0202_0202_0202_0202);
+    pub const FILE_D: Self = Self(0x0808_0808_0808_0808);
+    pub const FILE_F: Self = Self(0x2020_2020_2020_2020);
+    pub const FILE_E: Self = Self(0x1010_1010_1010_1010);
+    pub const FILE_H: Self = Self(0x8080_8080_8080_8080);
+    pub const FILE_G: Self = Self(0x4040_4040_4040_4040);
+    pub const FILE_C: Self = Self(0x0404_0404_0404_0404);
 
     pub const RANK_1: Bitboard = Bitboard(0x00000000000000FF);
     pub const RANK_2: Bitboard = Bitboard(0x000000000000FF00);

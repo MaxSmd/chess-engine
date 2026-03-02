@@ -3,7 +3,7 @@
 
 **Author:** MaxSmd
 **Created:** 2026-02-03
-**Version:** 4.0 (Consolidated)
+**Version:** 5.0 (Simplified Monorepo)
 **Target Timeline:** 2–3 weeks (MVP) → 5+ weeks (Production)
 **Target Strength:** 1500 ELO (MVP) → 2400+ ELO (Full Implementation)
 
@@ -46,6 +46,10 @@ This document is the single authoritative plan for building a high-performance c
 - **Extensibility:** Plugin architecture supports NNUE, tablebases, opening books
 - **Testability:** Pure functions and clear module boundaries enable isolated unit testing
 
+### Architecture Note — Single Crate, Module-Based
+
+This engine uses a **single crate with modules** rather than a multi-crate workspace. Modules provide the same logical separation (types, board, search, eval, etc.) without workspace boilerplate. If we later need to publish subcrates independently or enforce hard dependency boundaries, we can extract modules into their own crates with minimal refactoring.
+
 ### Key Decisions
 
 | Decision | Choice | Rationale |
@@ -58,6 +62,7 @@ This document is the single authoritative plan for building a high-performance c
 | Evaluation (Advanced) | NNUE-ready | Architecture supports neural eval |
 | Programming Style | Functional-first | Pure functions, immutability, composition |
 | Mutation Strategy | Interior mutability only for caches | TT, history tables use `Cell`/`AtomicU64` |
+| Project Structure | Single crate, module-based | Simple; split into workspace later if needed |
 
 ### Timeline Overview
 
@@ -272,6 +277,7 @@ Some side effects are necessary for performance. They are explicitly isolated:
 ```
 
 **Rule: Dependencies only flow downward. No cycles.**
+*Note: These are logical module boundaries within a single crate. The compiler doesn't enforce cross-module dependency direction — we rely on code review and the rule that child modules don't `use super::` into sibling domains.*
 
 ### 3.4 Trait Hierarchy
 
@@ -325,7 +331,7 @@ pub struct Position {
     hash: ZobristHash,           // 8 bytes
 
     // Cold data
-    side_to_move: Color,         // 1 byte
+    side_to_move: Colour,        // 1 byte
     castling: CastlingRights,    // 1 byte    — 4 bits used
     en_passant: Option<Square>,  // 2 bytes
     halfmove_clock: u8,          // 1 byte
@@ -355,7 +361,7 @@ impl Position {
     }
 
     #[inline(always)]
-    pub const fn side_to_move(&self) -> Color { self.side_to_move }
+    pub const fn side_to_move(&self) -> Colour { self.side_to_move }
 
     #[inline(always)]
     pub const fn piece_at(&self, sq: Square) -> Option<Piece> { /* ... */ }
@@ -725,14 +731,14 @@ fn evaluate(pos: &Position) -> Score {
 
 ```rust
 // AVOID: Manual loop
-fn count_pieces_bad(pos: &Position, color: Color) -> u32 {
+fn count_pieces_bad(pos: &Position, color: Colour) -> u32 {
     let mut count = 0;
     for piece_type in PieceType::ALL { count += pos.pieces(color, piece_type).count_ones(); }
     count
 }
 
 // PREFER: Iterator chain
-fn count_pieces(pos: &Position, color: Color) -> u32 {
+fn count_pieces(pos: &Position, color: Colour) -> u32 {
     PieceType::ALL.iter()
         .map(|&pt| pos.pieces(color, pt).count_ones())
         .sum()
@@ -986,8 +992,8 @@ fn unlikely(b: bool) -> bool { if b { std::hint::cold() } b }
 /// Immutable position interface
 pub trait Position: Clone + Copy + Eq + Hash + Send + Sync {
     fn piece_at(&self, sq: Square) -> Option<Piece>;
-    fn pieces(&self, color: Color, pt: PieceType) -> Bitboard;
-    fn side_to_move(&self) -> Color;
+    fn pieces(&self, colour: Colour, pt: PieceType) -> Bitboard;
+    fn side_to_move(&self) -> Colour;
     fn castling_rights(&self) -> CastlingRights;
     fn en_passant_square(&self) -> Option<Square>;
     fn halfmove_clock(&self) -> u8;
@@ -1022,7 +1028,7 @@ pub trait Evaluator<P: Position>: Send + Sync {
     fn evaluate(&self, pos: &P) -> Score;
     fn evaluate_relative(&self, pos: &P) -> Score {
         let score = self.evaluate(pos);
-        if pos.side_to_move() == Color::White { score } else { -score }
+        if pos.side_to_move() == Colour::White { score } else { -score }
     }
     fn trace(&self, pos: &P) -> EvalTrace;
 }
@@ -1137,7 +1143,7 @@ pub trait OpeningBook {
 
 ```
 chess-engine/
-├── Cargo.toml                      # Workspace root
+├── Cargo.toml                      # Single crate (lib + bin)
 ├── Cargo.lock
 ├── README.md
 ├── LICENSE
@@ -1149,120 +1155,101 @@ chess-engine/
 │       ├── ci.yml                  # Build, test, clippy, fmt
 │       └── bench.yml               # Performance regression tests
 │
-├── crates/
+├── src/
+│   ├── lib.rs                      # Crate root — re-exports all modules
+│   ├── main.rs                     # Binary entry point (UCI loop)
+│   │
 │   ├── types/                      # Zero-dependency, pure types
-│   │   ├── Cargo.toml
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── piece.rs            # Piece — const fns
-│   │       ├── colour.rs           # Colour — const fns
-│   │       ├── square.rs           # Square — const fns
-│   │       ├── bitboard.rs         # Bitboard ops — const fns
-│   │       ├── castling.rs         # CastlingRights — const fns
-│   │       ├── moves.rs            # Move encoding — const fns
-│   │       └── score.rs            # Score type — const fns
+│   │   ├── mod.rs
+│   │   ├── piece.rs                # Piece, PieceType — const fns
+│   │   ├── colour.rs               # Colour — const fns
+│   │   ├── square.rs               # Square — const fns
+│   │   ├── bitboard.rs             # Bitboard ops — const fns
+│   │   ├── castling.rs             # CastlingRights — const fns
+│   │   ├── moves.rs                # Move encoding — const fns
+│   │   └── score.rs                # Score type — const fns
 │   │
 │   ├── board/                      # Immutable position
-│   │   ├── Cargo.toml              # depends on: types
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── position.rs         # Immutable Position
-│   │       ├── zobrist.rs          # Const hash keys
-│   │       ├── fen.rs              # Pure FEN parsing
-│   │       └── makemove.rs         # Pure make_move()
+│   │   ├── mod.rs
+│   │   ├── position.rs             # Immutable Position
+│   │   ├── zobrist.rs              # Const hash keys
+│   │   ├── fen.rs                  # Pure FEN parsing
+│   │   └── makemove.rs             # Pure make_move()
 │   │
 │   ├── movegen/                    # Pure move generation
-│   │   ├── Cargo.toml              # depends on: types, board
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── traits.rs           # MoveGenerator trait
-│   │       ├── magic/
-│   │       │   ├── mod.rs
-│   │       │   ├── tables.rs       # Const magic tables
-│   │       │   └── attacks.rs      # Pure attack functions
-│   │       ├── generator.rs        # Pure move generation
-│   │       ├── perft.rs            # Pure perft
-│   │       └── see.rs              # Pure static exchange eval
+│   │   ├── mod.rs
+│   │   ├── traits.rs               # MoveGenerator trait
+│   │   ├── magic/
+│   │   │   ├── mod.rs
+│   │   │   ├── tables.rs           # Const magic tables
+│   │   │   └── attacks.rs          # Pure attack functions
+│   │   ├── generator.rs            # Pure move generation
+│   │   ├── perft.rs                # Pure perft
+│   │   └── see.rs                  # Pure static exchange eval
 │   │
 │   ├── eval/                       # Pure evaluation
-│   │   ├── Cargo.toml              # depends on: types, board
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── traits.rs           # Evaluator trait
-│   │       ├── classical/
-│   │       │   ├── mod.rs
-│   │       │   ├── material.rs     # Pure material eval
-│   │       │   ├── pst.rs          # Const PST tables
-│   │       │   ├── pawns.rs        # Pure + pawn hash cache
-│   │       │   ├── king_safety.rs  # Pure king safety
-│   │       │   ├── mobility.rs     # Pure mobility
-│   │       │   ├── endgame.rs      # Pure endgame eval
-│   │       │   └── weights.rs      # Tunable parameters
-│   │       ├── nnue/               # Neural network eval (future)
-│   │       │   ├── mod.rs
-│   │       │   ├── network.rs
-│   │       │   └── accumulator.rs
-│   │       └── composite.rs        # Evaluator composition
+│   │   ├── mod.rs
+│   │   ├── traits.rs               # Evaluator trait
+│   │   ├── classical/
+│   │   │   ├── mod.rs
+│   │   │   ├── material.rs         # Pure material eval
+│   │   │   ├── pst.rs              # Const PST tables
+│   │   │   ├── pawns.rs            # Pure + pawn hash cache
+│   │   │   ├── king_safety.rs      # Pure king safety
+│   │   │   ├── mobility.rs         # Pure mobility
+│   │   │   ├── endgame.rs          # Pure endgame eval
+│   │   │   └── weights.rs          # Tunable parameters
+│   │   ├── nnue/                   # Neural network eval (future)
+│   │   │   ├── mod.rs
+│   │   │   ├── network.rs
+│   │   │   └── accumulator.rs
+│   │   └── composite.rs            # Evaluator composition
 │   │
 │   ├── search/                     # Search with controlled mutation
-│   │   ├── Cargo.toml              # depends on: types, board, movegen, eval
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── traits.rs           # Searcher trait
-│   │       ├── context.rs          # SearchContext (explicit state)
-│   │       ├── alphabeta/
-│   │       │   ├── mod.rs
-│   │       │   ├── negamax.rs      # Functional recursion
-│   │       │   ├── pvs.rs          # PVS variant
-│   │       │   ├── quiescence.rs   # Quiescence search
-│   │       │   └── pruning.rs      # All pruning techniques
-│   │       ├── mcts/               # Monte Carlo (future)
-│   │       │   └── mod.rs
-│   │       ├── ordering/
-│   │       │   ├── mod.rs
-│   │       │   ├── mvv_lva.rs      # Pure scoring
-│   │       │   ├── killers.rs      # Interior mutability
-│   │       │   ├── history.rs      # Interior mutability
-│   │       │   └── orderer.rs      # Composite orderer
-│   │       ├── tt/
-│   │       │   ├── mod.rs
-│   │       │   ├── traits.rs       # TransTable trait
-│   │       │   ├── table.rs        # Lock-free TT
-│   │       │   └── entry.rs        # TTEntry
-│   │       └── limits.rs           # SearchLimits (immutable)
-│   │
-│   ├── time/                       # Pure time management
-│   │   ├── Cargo.toml              # depends on: types
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── traits.rs           # TimeController trait
-│   │       ├── standard.rs         # Incremental time control
-│   │       ├── fixed.rs            # Fixed time/depth
-│   │       └── sudden_death.rs     # No increment
+│   │   ├── mod.rs
+│   │   ├── traits.rs               # Searcher trait
+│   │   ├── context.rs              # SearchContext (explicit state)
+│   │   ├── alphabeta/
+│   │   │   ├── mod.rs
+│   │   │   ├── negamax.rs          # Functional recursion
+│   │   │   ├── pvs.rs              # PVS variant
+│   │   │   ├── quiescence.rs       # Quiescence search
+│   │   │   └── pruning.rs          # All pruning techniques
+│   │   ├── mcts/                   # Monte Carlo (future)
+│   │   │   └── mod.rs
+│   │   ├── ordering/
+│   │   │   ├── mod.rs
+│   │   │   ├── mvv_lva.rs          # Pure scoring
+│   │   │   ├── killers.rs          # Interior mutability
+│   │   │   ├── history.rs          # Interior mutability
+│   │   │   └── orderer.rs          # Composite orderer
+│   │   ├── tt/
+│   │   │   ├── mod.rs
+│   │   │   ├── traits.rs           # TransTable trait
+│   │   │   ├── table.rs            # Lock-free TT
+│   │   │   └── entry.rs            # TTEntry
+│   │   └── limits.rs               # SearchLimits (immutable)
 │   │
 │   ├── engine/                     # Orchestration layer
-│   │   ├── Cargo.toml              # depends on: all above
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── engine.rs           # Engine struct
-│   │       ├── builder.rs          # Functional builder
-│   │       ├── config.rs           # Immutable config
-│   │       └── thread_pool.rs      # SMP management
+│   │   ├── mod.rs
+│   │   ├── engine.rs               # Engine struct
+│   │   ├── builder.rs              # Functional builder
+│   │   ├── config.rs               # Immutable config
+│   │   └── thread_pool.rs          # SMP management
 │   │
-│   └── uci/                        # I/O boundary
-│       ├── Cargo.toml              # depends on: engine
-│       └── src/
-│           ├── lib.rs
-│           ├── parser.rs           # Pure parsing
-│           ├── handler.rs          # Command handling
-│           ├── output.rs           # Pure formatting
-│           └── options.rs          # UCI options
-│
-├── bins/
-│   └── chess-engine/               # Main binary
-│       ├── Cargo.toml
-│       └── src/
-│           └── main.rs             # I/O entry point
+│   ├── uci/                        # I/O boundary
+│   │   ├── mod.rs
+│   │   ├── parser.rs               # Pure parsing
+│   │   ├── handler.rs              # Command handling
+│   │   ├── output.rs               # Pure formatting
+│   │   └── options.rs              # UCI options
+│   │
+│   └── time/                       # Pure time management
+│       ├── mod.rs
+│       ├── traits.rs               # TimeController trait
+│       ├── standard.rs             # Incremental time control
+│       ├── fixed.rs                # Fixed time/depth
+│       └── sudden_death.rs         # No increment
 │
 ├── benches/
 │   ├── perft_bench.rs
@@ -1297,6 +1284,18 @@ chess-engine/
     └── CONTRIBUTING.md
 ```
 
+### Why a Single Crate?
+
+| Concern | Multi-Crate Workspace | Single Crate (chosen) |
+|---------|----------------------|----------------------|
+| Compilation | Parallel crate builds | Faster incremental (one unit) |
+| Dependency enforcement | Compiler-enforced | Convention-enforced (code review) |
+| Boilerplate | Cargo.toml per crate, path deps | One Cargo.toml |
+| Refactoring | Move items = change crate boundary | Move items = change `mod` path |
+| Splitting later | N/A | Extract module → own crate when needed |
+
+For a solo developer project, the simplicity of one crate far outweighs the marginal benefit of compiler-enforced module boundaries. The module structure mirrors the logical crate boundaries so extraction is straightforward later.
+
 ---
 
 ## 9. Implementation Phases
@@ -1306,42 +1305,135 @@ chess-engine/
 #### Tasks
 
 - [ ] Create repository structure
-- [ ] Set up workspace Cargo.toml
+- [ ] Set up Cargo.toml
 - [ ] Configure rustfmt and clippy for functional style
 - [ ] Create README with design philosophy
 - [ ] Set up basic CI workflow
 
-#### Workspace Cargo.toml
+#### Cargo.toml
 
 ```toml
-[workspace]
-resolver = "2"
-members = [
-    "crates/types",
-    "crates/board",
-    "crates/movegen",
-    "crates/eval",
-    "crates/search",
-    "crates/engine",
-    "crates/uci",
-    "bins/chess-engine",
-]
-
-[workspace.package]
+[package]
+name = "chess-engine"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85.0"
 license = "MIT"
+description = "A high-performance chess engine in Rust"
 
-[workspace.dependencies]
-types = { path = "crates/types" }
-board = { path = "crates/board" }
-movegen = { path = "crates/movegen" }
-eval = { path = "crates/eval" }
-search = { path = "crates/search" }
-engine = { path = "crates/engine" }
-uci = { path = "crates/uci" }
-thiserror = "1.0"
-rand = "0.8"
+[[bin]]
+name = "chess-engine"
+path = "src/main.rs"
+
+[lib]
+name = "chess_engine"
+path = "src/lib.rs"
+
+[dependencies]
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Parallelism (SMP feature)
+crossbeam = { version = "0.8", optional = true }
+rayon = { version = "1.10", optional = true }
+
+# Atomics for lock-free structures
+parking_lot = "0.12"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Logging (optional, for development)
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+proptest = "1.5"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[features]
+default = ["classical-eval", "magic-movegen"]
+
+# Evaluation
+classical-eval = []
+nnue-eval = []
+
+# Move generation
+magic-movegen = []
+pext-movegen = []          # Requires BMI2
+
+# Search
+smp = ["dep:crossbeam", "dep:rayon"]
+
+# Extras
+syzygy = []
+opening-book = []
+
+# Development
+tuning = []
+trace = []
+
+# ─────────────────────────────────────────────────
+# Lints
+# ─────────────────────────────────────────────────
+[lints.rust]
+unsafe_code = "warn"
+missing_docs = "warn"
+rust_2024_compatibility = { level = "warn", priority = -1 }
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+manual_let_else = "warn"
+match_same_arms = "warn"
+redundant_closure_for_method_calls = "warn"
+unnecessary_wraps = "warn"
+iter_without_into_iter = "warn"
+trivially_copy_pass_by_ref = "warn"
+cloned_instead_of_copied = "warn"
+flat_map_option = "warn"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_panics_doc = "allow"
+missing_errors_doc = "allow"
+too_many_lines = "allow"
+
+# ─────────────────────────────────────────────────
+# Profiles
+# ─────────────────────────────────────────────────
+
+[profile.dev]
+opt-level = 1
+debug = true
+debug-assertions = true
+overflow-checks = true
+lto = false
+incremental = true
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level = 3
+debug = false
+debug-assertions = false
+overflow-checks = false
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
+strip = false
+
+[profile.bench]
+inherits = "release"
+debug = true
+lto = "thin"
 ```
 
 #### Clippy Configuration
@@ -1350,17 +1442,6 @@ rand = "0.8"
 # clippy.toml
 avoid-breaking-exported-api = false
 cognitive-complexity-threshold = 15
-
-# .clippy.args
--W clippy::pedantic
--W clippy::nursery
--W clippy::unwrap_used
--W clippy::expect_used
--A clippy::module_name_repetitions
--W clippy::manual_let_else
--W clippy::match_same_arms
--W clippy::redundant_closure_for_method_calls
--W clippy::unnecessary_wraps
 ```
 
 #### Rustfmt Configuration
@@ -1381,6 +1462,7 @@ fn_call_width = 80
 - [x] Move encoding: u16 vs u32? → **u16** (compact, cache-friendly)
 - [x] Pre-computed vs runtime magics? → **Pre-computed** (const where possible)
 - [x] TT entry size? → **16 bytes** (cache-aligned)
+- [x] Single crate vs workspace? → **Single crate** (simpler, split later if needed)
 
 ---
 
@@ -1391,16 +1473,16 @@ fn_call_width = 80
 
 #### MVP-1: Foundation Layer (Days 1–2)
 
-##### Day 1: Types Crate (Pure, Const)
+##### Day 1: Types Module (Pure, Const)
 
 | File | Contents | Notes |
 |------|----------|-------|
-| `piece.rs` | `Piece`, `Color`, `PieceType` enums | All const fns |
-| `square.rs` | `Square` (0-63), `File`, `Rank` | All const fns |
-| `bitboard.rs` | `Bitboard` (u64) with functional iterator | Const where possible |
-| `moves.rs` | `Move` (u16), `MoveFlag`, `MoveList` | Stack-allocated list |
-| `castling.rs` | `CastlingRights` (4 bits) | Const bit manipulation |
-| `score.rs` | `Score` type with operators, `MATE`/`DRAW` constants | Const arithmetic |
+| `src/types/piece.rs` | `Piece`, `Colour`, `PieceType` enums | All const fns |
+| `src/types/square.rs` | `Square` (0-63), `File`, `Rank` | All const fns |
+| `src/types/bitboard.rs` | `Bitboard` (u64) with functional iterator | Const where possible |
+| `src/types/moves.rs` | `Move` (u16), `MoveFlag`, `MoveList` | Stack-allocated list |
+| `src/types/castling.rs` | `CastlingRights` (4 bits) | Const bit manipulation |
+| `src/types/score.rs` | `Score` type with operators, `MATE`/`DRAW` constants | Const arithmetic |
 
 **Example: Functional Bitboard**
 
@@ -1436,14 +1518,14 @@ impl Bitboard {
 
 **Deliverable:** All types compile, basic unit tests pass
 
-##### Day 2: Board Crate (Immutable)
+##### Day 2: Board Module (Immutable)
 
 | File | Contents | Notes |
 |------|----------|-------|
-| `position.rs` | Immutable `Position` struct, game state | Copy semantics |
-| `zobrist.rs` | Const hash generation, incremental updates | Compile-time tables |
-| `fen.rs` | Pure FEN parsing and generation | Returns `Result<Position>` |
-| `makemove.rs` | Pure `make_move()` → returns new `Position` | All pure transformations |
+| `src/board/position.rs` | Immutable `Position` struct, game state | Copy semantics |
+| `src/board/zobrist.rs` | Const hash generation, incremental updates | Compile-time tables |
+| `src/board/fen.rs` | Pure FEN parsing and generation | Returns `Result<Position>` |
+| `src/board/makemove.rs` | Pure `make_move()` → returns new `Position` | All pure transformations |
 
 **Deliverable:** Can parse FEN, make moves, generate FEN back
 
@@ -1453,22 +1535,22 @@ impl Bitboard {
 
 | File | Contents | Debugging |
 |------|----------|-----------|
-| `tables.rs` | Knight, king, pawn attack tables (const) | Low |
-| `magic/` | Magic bitboard tables (pre-computed) | Low |
-| `attacks.rs` | `bishop_attacks()`, `rook_attacks()` (pure) | Medium |
+| `src/movegen/magic/tables.rs` | Knight, king, pawn attack tables (const) | Low |
+| `src/movegen/magic/` | Magic bitboard tables (pre-computed) | Low |
+| `src/movegen/magic/attacks.rs` | `bishop_attacks()`, `rook_attacks()` (pure) | Medium |
 
 ##### Day 4: Move Generator
 
 | File | Contents | Debugging |
 |------|----------|-----------|
-| `generator.rs` | `generate_moves()`, `generate_captures()` — all pure | **HIGH** |
+| `src/movegen/generator.rs` | `generate_moves()`, `generate_captures()` — all pure | **HIGH** |
 
 ##### Day 5: Legal Moves & Perft Validation
 
 | File | Contents | Debugging |
 |------|----------|-----------|
-| `legality.rs` | Pin detection, check detection | **HIGH** |
-| `perft.rs` | Pure perft function for validation | Low |
+| `src/movegen/generator.rs` | Pin detection, check detection | **HIGH** |
+| `src/movegen/perft.rs` | Pure perft function for validation | Low |
 
 **⚠️ Critical: Perft Validation — DO NOT PROCEED UNTIL PERFT PASSES**
 
@@ -1492,25 +1574,25 @@ Common bugs to watch for:
 
 | File | Contents |
 |------|----------|
-| `traits.rs` | `Evaluator` trait definition (pure interface) |
-| `material.rs` | Pure piece counting |
-| `pst.rs` | Const piece-square tables |
-| `simple.rs` | MVP evaluator (material + PST, composed) |
+| `src/eval/traits.rs` | `Evaluator` trait definition (pure interface) |
+| `src/eval/classical/material.rs` | Pure piece counting |
+| `src/eval/classical/pst.rs` | Const piece-square tables |
+| `src/eval/classical/mod.rs` | MVP evaluator (material + PST, composed) |
 
 ##### Day 7: Core Search
 
 | File | Contents |
 |------|----------|
-| `negamax.rs` | Functional alpha-beta with `try_fold` |
-| `ordering.rs` | MVV-LVA ordering (pure scoring) |
+| `src/search/alphabeta/negamax.rs` | Functional alpha-beta with `try_fold` |
+| `src/search/ordering/mvv_lva.rs` | MVV-LVA ordering (pure scoring) |
 
 ##### Day 8: Search Infrastructure
 
 | File | Contents |
 |------|----------|
-| `quiescence.rs` | Capture-only search |
-| `tt/table.rs` | Basic transposition table (interior mutability) |
-| `context.rs` | `SearchContext` — explicit state, no globals |
+| `src/search/alphabeta/quiescence.rs` | Capture-only search |
+| `src/search/tt/table.rs` | Basic transposition table (interior mutability) |
+| `src/search/context.rs` | `SearchContext` — explicit state, no globals |
 
 #### MVP-4: UCI & Integration (Days 9–11)
 
@@ -1518,9 +1600,9 @@ Common bugs to watch for:
 
 | File | Contents |
 |------|----------|
-| `parser.rs` | Pure command parsing |
-| `handler.rs` | Command execution |
-| `output.rs` | Pure info string formatting |
+| `src/uci/parser.rs` | Pure command parsing |
+| `src/uci/handler.rs` | Command execution |
+| `src/uci/output.rs` | Pure info string formatting |
 
 **Required UCI Commands:**
 
@@ -1539,9 +1621,9 @@ quit
 
 | File | Contents |
 |------|----------|
-| `engine.rs` | Orchestrates components |
-| `config.rs` | Immutable configuration |
-| `builder.rs` | Functional builder |
+| `src/engine/engine.rs` | Orchestrates components |
+| `src/engine/config.rs` | Immutable configuration |
+| `src/engine/builder.rs` | Functional builder |
 
 ##### Day 11: Testing
 
@@ -1577,30 +1659,13 @@ quit
 
 | Day | Feature | ELO Gain | Files |
 |-----|---------|----------|-------|
-| 15 | PVS + Killer Moves | +90 | `pvs.rs`, `killers.rs` |
-| 16 | History Heuristic | +30 | `history.rs` |
-| 17 | Null Move Pruning | +80 | `pruning/null_move.rs` |
-| 18 | Late Move Reductions | +100 | `pruning/lmr.rs` |
-| 19 | Futility + Aspiration | +60 | `pruning/futility.rs` |
-| 20 | SEE + Check Extensions | +80 | `see.rs` |
-| 21 | Razoring + Testing | +20 | `pruning/razoring.rs` |
-
-#### New Files
-
-```
-search/
-├── ordering/
-│   ├── killers.rs      # NEW — interior mutability (Cell<Move>)
-│   ├── history.rs      # NEW — interior mutability (AtomicI16)
-│   └── see.rs          # NEW — pure
-├── pruning/
-│   ├── mod.rs
-│   ├── null_move.rs    # NEW
-│   ├── lmr.rs          # NEW
-│   ├── futility.rs     # NEW
-│   └── razoring.rs     # NEW
-└── pvs.rs              # NEW
-```
+| 15 | PVS + Killer Moves | +90 | `src/search/alphabeta/pvs.rs`, `src/search/ordering/killers.rs` |
+| 16 | History Heuristic | +30 | `src/search/ordering/history.rs` |
+| 17 | Null Move Pruning | +80 | `src/search/alphabeta/pruning.rs` |
+| 18 | Late Move Reductions | +100 | `src/search/alphabeta/pruning.rs` |
+| 19 | Futility + Aspiration | +60 | `src/search/alphabeta/pruning.rs` |
+| 20 | SEE + Check Extensions | +80 | `src/movegen/see.rs` |
+| 21 | Razoring + Testing | +20 | `src/search/alphabeta/pruning.rs` |
 
 #### Phase 2 Completion Checklist
 
@@ -1620,11 +1685,11 @@ search/
 
 | Day | Feature | ELO Gain | Files |
 |-----|---------|----------|-------|
-| 22–23 | Pawn Structure | +40 | `pawns.rs` |
-| 24–25 | King Safety | +50 | `king_safety.rs` |
-| 26 | Mobility + Pieces | +55 | `mobility.rs`, `pieces.rs` |
-| 27 | Tapered Evaluation | +30 | `tapered.rs` |
-| 28 | Endgame Knowledge | +25 | `endgame.rs` |
+| 22–23 | Pawn Structure | +40 | `src/eval/classical/pawns.rs` |
+| 24–25 | King Safety | +50 | `src/eval/classical/king_safety.rs` |
+| 26 | Mobility + Pieces | +55 | `src/eval/classical/mobility.rs` |
+| 27 | Tapered Evaluation | +30 | `src/eval/classical/mod.rs` |
+| 28 | Endgame Knowledge | +25 | `src/eval/classical/endgame.rs` |
 
 #### Evaluation Components Detail
 
@@ -1727,12 +1792,12 @@ Worker Threads:                              (functional benefit: immutable
 #### Path A: NNUE Evaluation (+200–300 ELO)
 
 ```
-eval/nnue/
+src/eval/nnue/
 ├── mod.rs
 ├── network.rs        # Network architecture
 ├── accumulator.rs    # Incremental updates (SIMD)
 ├── simd.rs           # SIMD inference
-└── weights.bin       # Trained weights
+└── weights.bin       # Trained weights (in resources/)
 
 Time: 2-3 weeks | Difficulty: High
 ```
@@ -1740,7 +1805,7 @@ Time: 2-3 weeks | Difficulty: High
 #### Path B: Syzygy Tablebases (+50 ELO)
 
 ```
-tablebases/
+src/tablebases/
 ├── mod.rs
 ├── probe.rs          # Tablebase probing
 └── wdl.rs            # Win/Draw/Loss handling
@@ -1751,7 +1816,7 @@ Time: 3-5 days | Difficulty: Medium (use fathom library)
 #### Path C: Opening Book (+30 ELO)
 
 ```
-book/
+src/book/
 ├── mod.rs
 ├── polyglot.rs       # Standard format
 └── learning.rs       # Learn from games
@@ -1762,7 +1827,7 @@ Time: 2-3 days | Difficulty: Easy
 #### Path D: Self-Play Training (+100–200 ELO)
 
 ```
-training/
+src/training/
 ├── mod.rs
 ├── selfplay.rs       # Game generation
 ├── spsa.rs           # Parameter tuning
@@ -1774,7 +1839,7 @@ Time: 1-2 weeks | Difficulty: Medium
 #### Path E: MCTS/Hybrid Search
 
 ```
-search/mcts/
+src/search/mcts/
 ├── mod.rs
 ├── tree.rs
 ├── policy.rs
@@ -1813,7 +1878,7 @@ pub struct Position {
     pieces: [Bitboard; 12],      // 96 bytes
     occupancy: [Bitboard; 3],    // 24 bytes
     hash: ZobristHash,           // 8 bytes
-    side_to_move: Color,         // 1 byte
+    side_to_move: Colour,        // 1 byte
     castling: CastlingRights,    // 1 byte
     en_passant: Option<Square>,  // 2 bytes
     halfmove_clock: u8,          // 1 byte
@@ -2028,7 +2093,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
-      - run: cargo test --all
+      - run: cargo test
       - run: cargo run --release -- bench
 ```
 
@@ -2093,18 +2158,18 @@ jobs:
 
 | Need to modify... | Look in... |
 |-------------------|------------|
-| Piece values | `crates/eval/src/classical/material.rs` |
-| Move ordering | `crates/search/src/ordering/` |
-| Pruning parameters | `crates/search/src/pruning/` |
-| UCI commands | `crates/uci/src/handler.rs` |
-| Time management | `crates/time/src/` |
-| Search context | `crates/search/src/context.rs` |
+| Piece values | `src/eval/classical/material.rs` |
+| Move ordering | `src/search/ordering/` |
+| Pruning parameters | `src/search/alphabeta/pruning.rs` |
+| UCI commands | `src/uci/handler.rs` |
+| Time management | `src/time/` |
+| Search context | `src/search/context.rs` |
 
 ### 15.3 Useful Commands
 
 ```bash
 # Run tests
-cargo test --all
+cargo test
 
 # Run benchmarks
 cargo bench

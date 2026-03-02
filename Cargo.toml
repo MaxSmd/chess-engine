@@ -1,68 +1,67 @@
-[workspace.package]
+[package]
 name = "chess-engine"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.93.0"
+rust-version = "1.85.0"
+description = "A high-performance chess engine in Rust"
 
-[workspace]
-resolver = "2"
-members = [
-    "crates/types",
-    "crates/board",
-    "crates/movegen",
-    "crates/eval",
-    "crates/search",
-    "crates/engine",
-    "crates/uci",
-    "crates/time",
-    "bins/chess-engine",
-]
-exclude = ["tests"]
-
-[workspace.dependencies]
-# Internal crates
-chess-types = { path = "crates/types" }
-chess-board = { path = "crates/board" }
-chess-movegen = { path = "crates/movegen" }
-chess-eval = { path = "crates/eval" }
-chess-search = { path = "crates/search" }
-chess-engine = { path = "crates/engine" }
-chess-uci = { path = "crates/uci" }
-
-# Serialization (optional, for debugging/config)
-serde = { version = "1.0", features = ["derive"] }
-
+[dependencies]
 # Error handling
 thiserror = "2.0"
 anyhow = "1.0"
 
 # Parallelism (SMP feature)
-crossbeam = "0.8"
-rayon = "1.10"
+crossbeam = { version = "0.8", optional = true }
+rayon = { version = "1.10", optional = true }
 
 # Atomics for lock-free structures
 parking_lot = "0.12"
 
-# CLI for the binary
+# CLI
 clap = { version = "4.5", features = ["derive"] }
 
 # Logging (optional, for development)
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Testing
+[dev-dependencies]
 proptest = "1.5"
 criterion = { version = "0.5", features = ["html_reports"] }
 
 # =============================================================================
-# Workspace-wide lints (applied to all members)
+# Features
 # =============================================================================
-[workspace.lints.rust]
+[features]
+default = ["classical-eval", "magic-movegen"]
+
+# Evaluation
+classical-eval = []
+nnue-eval = []
+
+# Move generation
+magic-movegen = []
+pext-movegen = []          # Requires BMI2
+
+# Search
+smp = ["dep:crossbeam", "dep:rayon"]
+
+# Extras
+syzygy = []
+opening-book = []
+
+# Development
+tuning = []
+trace = []
+
+# =============================================================================
+# Lints
+# =============================================================================
+[lints.rust]
 unsafe_code = "warn"
 missing_docs = "warn"
 rust_2024_compatibility = { level = "warn", priority = -1 }
 
-[workspace.lints.clippy]
+[lints.clippy]
 # Pedantic lints for functional style
 pedantic = { level = "warn", priority = -1 }
 nursery = { level = "warn", priority = -1 }
@@ -103,7 +102,7 @@ overflow-checks = true
 lto = false
 incremental = true
 
-# Development with full debug info
+# Dependencies get higher optimization even in dev
 [profile.dev.package."*"]
 opt-level = 2
 
@@ -129,26 +128,3 @@ strip = false
 inherits = "release"
 debug = true
 lto = "thin"
-
-# =============================================================================
-# Workspace-wide features
-# =============================================================================
-[workspace.metadata.features]
-# These are documented here for reference; actual features are in member crates
-
-# Evaluation strategies
-# classical-eval: Traditional hand-crafted evaluation (default)
-# nnue-eval: Neural network evaluation
-
-# Move generation strategies
-# magic-movegen: Magic bitboards (default, portable)
-# pext-movegen: PEXT-based generation (requires BMI2)
-
-# Search features
-# smp: Symmetric multiprocessing (Lazy SMP)
-
-# Extras
-# syzygy: Syzygy tablebase support
-# opening-book: Polyglot opening book support
-# tuning: Enable tuning infrastructure
-# trace: Detailed evaluation tracing

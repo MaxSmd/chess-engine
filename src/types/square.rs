@@ -8,6 +8,11 @@ impl Square {
     }
 
     #[inline]
+    pub const fn from_file_rank(file: u8, rank: u8) -> Option<Square> {
+        if file < 8 && rank < 8 { Some(Self(rank * 8 + file)) } else { None }
+    }
+
+    #[inline]
     pub const fn index(self) -> usize {
         self.0 as usize
     }
